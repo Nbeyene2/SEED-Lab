@@ -1,2 +1,6 @@
 Demo 1
-This folder contains all of the code, simulations, and models that were created for Demo 1. The computer vision files are used to detect an Aruco marker and send the angle displacement to the LCD screen to be displayed. The Arduino code uses the same motor controller code as used in the Mini Project, we just added additional variables and pins for a second motor to serve as the other robot wheel. We can manually set an angle in degrees and a distance in inches and these are converted into encoder counts using equations that we derived in the code. We also have included the demo 1 video of each subsystem task being completed.
+This folder contains all of the code, simulations, and models that were created for Demo 1. 
+The computer vision files are used to detect an Aruco marker and send the angle displacement to the LCD screen to be displayed. 
+The Arduino code uses the same motor controller code as used in the Mini Project, we just added additional variables and pins for a second motor to serve as the other robot wheel.
+We can manually set an angle in degrees and a distance in inches and these are converted into encoder counts using equations that we derived in the code. 
+We also have included the demo 1 video of each subsystem task being completed.

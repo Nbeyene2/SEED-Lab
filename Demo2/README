@@ -1,1 +1,14 @@
-Readme
+Demo 2
+This folder contains all of the code and documents that were created for Demo 2. 
+The computer vision files are used to detect an Aruco marker and send five bytes to the Arduino over I2C:
+  The first byte is a boolean value that is true if a marker is dectected, false if not detected.
+  The second and third bytes are the difference angle from the marker to the middle of the camera.
+  The fourth and fifth bytes are the distance from the camera to the marker.
+The Arduino code uses the same motor controller code as used before, we just added a state machine that goes through the different stages of the demo.
+  The robot will spin until finding a marker, then adjust to align directly on the marker, then move toward the marker until within 12 inches, then move an additional 12 inches and stop.
+We also have included the demo 2 video of the robot performing each test. 
+Task division: 
+  Arduino state machine - Jason
+  Arduino wheel count and controller correction adjustments - Adam
+  RPI python code, computer vision, and I2C communication - Arian
+  Integration - Nahom

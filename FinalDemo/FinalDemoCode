@@ -1,0 +1,389 @@
+#include <DualMC33926MotorShield.h>
+DualMC33926MotorShield md;
+#include <Wire.h>
+#include <Encoder.h>
+Encoder myEnc(2, 5); //set encoder pins for motorL
+Encoder myEnc1(3, 6); //set encoder pins for motorR
+
+#define msg_size 32 //define size of max recieve message
+#define resetn 4 //define reset pin (active low)
+#define PWM_outL 9 //define output PWM pin left
+#define directionPinL 7 //define pin controlling direction left
+#define PWM_outR 10 //define output PWM pin right
+#define directionPinR 8 //define pin controlling direction right
+uint8_t msg_recieve[msg_size];
+
+void setup() {
+  Serial.begin(115200); //set baud rate
+  //Serial.begin(9600);
+  pinMode(PWM_outL, OUTPUT); //assign output PWM pin left
+  pinMode(PWM_outR, OUTPUT); //assign output PWM pin right
+  
+  digitalWrite(resetn, HIGH); //toggle reset pin
+  analogWrite(PWM_outL, 0); //initialize PWM left
+  analogWrite(PWM_outR, 0); //initialize PWM right
+  md.init(); //initialize motor shield
+  analogWrite(PWM_outL,0); //initialize PWM left
+  analogWrite(PWM_outR,0); //initialize PWM right
+  Wire.begin(0x8); //join I2C bus as slave with address 8
+  Wire.onReceive(receiveEvent); //call recieveEvent when data received
+  Wire.onRequest(requestEvent); //call requestEvent when data requested
+}
+//Variables will be updated by rasberry pi
+long angle = 0;
+long dist = 0;
+long elapsedTime = 0;
+int change = 0;
+bool markerFound = false;
+bool restart = false;
+bool turned = false;
+bool angleMoved = false;
+bool findingAngle = false;
+bool forward = false;
+bool lastDist = true;
+long tempDist = 0;
+
+
+//Initialize position and motor controller variables for left motor
+long currentPositionL = -999; //initialize current Position
+long newPositionL = 0; //initialize new Position
+long desiredPositionL = 0; //initialize desired Position from Aruco marker
+double changeL = (2*3.14159265)/3200; //delta value (2pi/3200)
+double currentThetaL = 0; //initialize current theta value
+double newThetaL = 0; //initialize the new theta value
+double voltageL = 0; //initialize voltage level
+double currentVoltageL = 8.0; //set voltage cap
+int PWML = 0; //initialize PWM output to motor
+int PWMtempL = 0;
+double currentTimeL = 0; //initialize current time
+double newTimeL = 0; //initialize the new time
+double errorL = 0; //initialize error value
+double KpL = 8; //initialize Kp
+double KiL = 0.0008; //initialize Ki
+double currentIntegralL = 0; //initialize current integral term
+double newIntegralL = 0; //initialize new integral term
+double futureThetaL = 0; //initialize future theta term
+double futurePositionL = 0; //initialize future position term
+int AngVelL = 0;
+
+//Initialize position and motor controller variables for right motor
+long currentPositionR = -999; //initialize current Position
+long newPositionR = 0; //initialize new Position
+long desiredPositionR = 0; //initialize desired Position from Aruco marker
+double changeR = (2*3.14159265)/3200; //delta value (2pi/3200)
+double currentThetaR = 0; //initialize current theta value
+double newThetaR = 0; //initialize the new theta value
+double voltageR = 0; //initialize voltage level
+double currentVoltageR = 8.0; //set voltage cap
+int PWMR = 0; //initialize PWM output to motor
+int PWMtempR = 0;
+double currentTimeR = 0; //initialize current time
+double newTimeR = 0; //initialize the new time
+double errorR = 0; //initialize error value
+double KpR = 8; //initialize Kp
+double KiR = 0.0008; //initialize Ki
+double currentIntegralR = 0; //initialize current integral term
+double newIntegralR = 0; //initialize new integral term
+double futureThetaR = 0; //initialize future theta term
+double futurePositionR = 0; //initialize future position term
+int AngVelR = 0;
+int timeCounter = 0;
+int timeCounter2 = 0;
+int markerCount = 1;
+int markerLooking = [];
+
+//TODO ---Add right wheel code to mirror left wheel past this point---
+
+void loop() {
+  //controller left variable equations
+  currentTimeL = (millis()/1000.0); //find current time in seconds
+  currentThetaL = newThetaL; //reset the new theta with the old theta
+  newIntegralL = currentIntegralL + (errorL*changeL); //In = Io + (e*d)*I
+  currentIntegralL = newIntegralL; //reset old integral term
+  //futurePosition = futureTheta * 509; //x = theta * P
+  errorL = futurePositionL - newPositionL; //e = x1 - x0
+  voltageL = KpL * (errorL * changeL) + (KiL * newIntegralL); //v = Kp * (e*d) + (Ki * In)
+  PWML = (voltageL/currentVoltageL)*255; //set PWM output
+  PWMtempL = PWML;
+  if (PWML > 255) { 
+    PWML = -175; //if above max value, set at cap
+  }
+  else if (PWML > 150) {
+    PWML = -150;
+  }
+  else if (PWML < -255) {
+    PWML = -175; //if below min value, set at floor
+  }
+  else if (PWML < -150) {
+    PWML = -150;
+  }
+  if (change == 4) {
+    PWML = 0;
+    PWMR = 0;
+  }
+  if (PWML >= 0) {
+    digitalWrite(directionPinL, LOW); //set direction if positive
+    //Serial.println(0);
+  }
+  if (PWML < 0) {
+    digitalWrite(directionPinL, HIGH); //set direction if negative
+    if (change == 3){
+      digitalWrite(directionPinL, LOW);
+    }
+    //Serial.println(1);
+  }
+  timeCounter ++;
+  if ((change == 1 && (timeCounter%25 == 0)) || (findingAngle == true && (timeCounter%5 == 0)) || (forward == true && (timeCounter%40 == 0))) {
+    //Serial.println("delay");
+    //Serial.println(change);
+    PWML = 0;
+    PWMR = 0;
+    analogWrite(PWM_outL, abs(PWML)); //set PWM pulse absolute value
+    analogWrite(PWM_outR, abs(PWMR)); //set PWM pulse absolute value
+    delay(1000);
+    PWML = -200;
+    PWMR = -200;
+  }
+  analogWrite(PWM_outL, abs(PWML)); //set PWM pulse absolute value
+  //PWML = PWMtempL;
+/*
+  //print to serial monitor
+  Serial.print("Desired: ");
+  Serial.print(futurePosition);
+  Serial.print("\tActual: ");
+  Serial.print(newPosition);
+  Serial.print("\tPWM value: ");
+  Serial.print(PWM);
+  Serial.print("\tError: ");
+  Serial.println(error);
+*/
+  //Serial.println(newPositionL);
+  // Speed limit
+  newPositionL = myEnc.read(); //read encoder value
+  //Serial.println(newPositionL); 
+  if (newPositionL != currentPositionL) { //if detected change in position
+    if (newPositionL > currentPositionL) { //if increased position
+      newThetaL = newThetaL + (changeL * ((float)(newPositionL - currentPositionL))); //correct by subtracting difference
+    }
+    else { //if decreased position
+      newThetaL = newThetaL - (changeL * ((float)(currentPositionL - newPositionL))); //correct by adding difference
+    }
+    currentPositionL = newPositionL; //reset position
+  }
+  newTimeL = (millis()/1000.0); //find end time in seconds
+  delay(8 - ((newTimeL - currentTimeL)/1000)); //add delay
+  //Serial.print(currentPositionL);
+  //Serial.print("\t");
+  //Serial.println(newPositionL);
+  /*
+  if (millis() > 1000) {
+    futurePosition = 3000;
+  }
+  AngVel = 2*3.14*newPosition/(30*(millis()/1000));
+  Serial.println(AngVel);
+  */
+  //controller right variable equations
+  currentTimeR = (millis()/1000.0); //find current time in seconds
+  currentThetaR = newThetaR; //reset the new theta with the old theta
+  newIntegralR = currentIntegralR + (errorR*changeR); //In = Io + (e*d)*I
+  currentIntegralR = newIntegralR; //reset old integral term
+  //futurePosition = futureTheta * 509; //x = theta * P
+  errorR = futurePositionR - newPositionR; //e = x1 - x0
+  voltageR = KpR * (errorR * changeR) + (KiR * newIntegralR); //v = Kp * (e*d) + (Ki * In)
+  PWMR = (voltageR/currentVoltageR)*255; //set PWM output     *255
+  PWMtempR = PWMR;
+  //Serial.println(PWMR);
+  if (PWMR > 255) { 
+    PWMR = -175; //if above max value, set at cap
+  }
+  else if (PWMR > 150) {
+    PWMR = -150;
+  }
+  else if (PWMR < -255) {
+    PWMR = -175; //if below min value, set at floor
+  }
+  else if (PWMR < -150) {
+    PWMR = -150;
+  }
+  if (change == 4) {
+    PWMR = 0;
+    PWML = 0;
+  }
+  if (PWMR >= 0) {
+    digitalWrite(directionPinR, LOW); //set direction if positive
+    //Serial.println(0);
+  }
+  if (PWMR < 0) {
+    digitalWrite(directionPinR, HIGH); //set direction if negative
+    //Serial.println(1);
+  }
+  analogWrite(PWM_outR, abs(PWMR)); //set PWM pulse absolute value
+  //PWMR = PWMtempR;
+/*
+  //print to serial monitor
+  Serial.print("Desired: ");
+  Serial.print(futurePosition);
+  Serial.print("\tActual: ");
+  Serial.print(newPosition);
+  Serial.print("\tPWM value: ");
+  Serial.print(PWM);
+  Serial.print("\tError: ");
+  Serial.println(error);
+*/
+  //Serial.println(newPositionR);
+  // Speed limit
+  newPositionR = myEnc1.read(); //read encoder value
+  //Serial.println(newPositionL); 
+  if (newPositionR != currentPositionR) { //if detected change in position
+    if (newPositionR > currentPositionR) { //if increased position
+      newThetaR = newThetaR + (changeR * ((float)(newPositionR - currentPositionR))); //correct by subtracting difference
+    }
+    else { //if decreased position
+      newThetaR = newThetaR - (changeR * ((float)(currentPositionR - newPositionR))); //correct by adding difference
+    }
+    currentPositionR = newPositionR; //reset position
+  }
+  newTimeR = (millis()/1000.0); //find end time in seconds
+  elapsedTime += newTimeR;
+
+  markerLooking = [1, 2, 3, 4, 5, 6];
+  switch(change){
+    case 0:
+    // Start
+      if(not markerFound){
+        change = 1;
+      }
+      break;
+    case 1:
+    // Rotate
+      //Serial.println(PWMR);
+      if(not markerFound){
+        //Serial.println("0");
+        futurePositionR += -20.7 * 20;
+        futurePositionL += -22.2 * 20;   
+      }else{
+        futurePositionL = newPositionL;
+        futurePositionR = newPositionR;
+        //Serial.println("1");
+        findingAngle = true;
+        change = 2;
+      }
+      break;
+      //Serial.println(futurePositionL);
+     case 2:
+      // Turn angle once marker is detected
+      //Serial.println("2");
+      if(turned == false){
+        //Serial.println("3");
+        if(angle < 0){
+          futurePositionR += -20.7 * 1;
+          futurePositionL += -22.2 * 1;
+        }else{
+          futurePositionR -= -20.7 * 1;
+          futurePositionL -= -22.2 * 1;
+        }
+        if(abs(angle) < 2){
+          findingAngle = false;
+          turned = true;
+          digitalWrite(directionPinL, LOW);
+          forward = true;
+          change = 3;
+        }
+        
+      }
+      //Serial.println(futurePositionL);
+      break;
+    case 3:
+    // Forward
+      if(forward){
+        futurePositionR -= 173 * 2;
+        futurePositionL += 169 * 2;
+        if(dist <  12){
+          forward = false;
+          newPositionL = futurePositionL;
+          newPositionR = futurePositionR;
+          futurePositionR -= 173 * 5;
+          futurePositionL += 169 * 5;
+        }
+      } else {
+        timeCounter2 ++;
+        if (timeCounter2 == 50) {
+          change = 4;
+        }
+      }
+      break;
+     case 4:
+        markerCount++;
+        if(markerCount < 6){
+          change = 0;
+          futurePositionL = newPositionL;
+          futurePositionR = newPositionR;
+          turned = false;
+        }
+        break;
+  }
+  
+
+  
+  //wheel diameter = 5.75in, 1 rev = pi*diameter, 3200counts/1rev = 177counts/inch
+  //.326587
+
+  //Serial.println(futurePositionL);
+
+  
+  delay(8 - ((newTimeR - currentTimeR)/1000)); //add delay
+  //Serial.print(currentPositionL);
+  //Serial.print("\t");
+  //Serial.println(newPositionL);
+  /*
+  if (millis() > 1000) {
+    futurePosition = 3000;
+  }
+  AngVel = 2*3.14*newPosition/(30*(millis()/1000));
+  Serial.println(AngVel);
+  */
+  
+  
+  
+}
+
+
+//I2C Communication Setup
+
+// Function that executes whenever data is received from master
+void receiveEvent(int howMany) {
+  // Initialize variables to read in the incoming bytes
+  uint8_t buff[5];
+  uint8_t i = 0;
+
+  // IDK why but I had to read an extra byte every time
+  Wire.read();
+ 
+  // Set the requested data
+  while (Wire.available()) { // loop through all but the last
+    buff[i++] = (uint8_t) Wire.read(); // receive byte as a character
+  }
+
+  markerFound = buff[0];
+ 
+  // Cool pointer stuff
+  int16_t * int_buff = (void*) &buff[1];
+  angle = *int_buff/100.0;
+  if(abs(angle) < .5 and angle != 0){
+    angleMoved = true;
+  }
+  int_buff = (void*) &buff[3];
+  dist = *int_buff/100.0;
+  dist = dist / 2.54;
+  
+
+  //Serial prints can be commented out
+  //Serial.println("");
+  //Serial.println(markerFound);
+  //Serial.println(angle);
+  //Serial.println(dist);
+  //Serial.println("");
+}
+void requestEvent () {
+  Wire.write((byte) (newPositionL >> 8 * 3) & 0xFF);
+}
